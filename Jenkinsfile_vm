@@ -1,0 +1,261 @@
+pipeline {
+  agent any
+
+  options {
+    timestamps()
+    disableConcurrentBuilds()
+    buildDiscarder(logRotator(numToKeepStr: '20'))
+  }
+
+  tools { jdk 'jdk-17' }
+
+  parameters {
+    string(name: 'APP_NAME', defaultValue: 'library-management', description: 'Base name for containers')
+    string(name: 'DOCKER_IMAGE', defaultValue: 'nazhabibi/library-management', description: 'Docker Hub repo')
+    string(name: 'JAR_NAME', defaultValue: 'psoft-g1-0.0.1-SNAPSHOT.jar', description: 'Built JAR name')
+    booleanParam(name: 'PUSH_IMAGE', defaultValue: true, description: 'Push image to Docker Hub?')
+    booleanParam(name: 'VM_DEPLOY', defaultValue: true, description: 'Deploy to VM?')
+    string(name: 'VM_NAME', defaultValue: 'ci-agent', description: 'VM name')
+    string(name: 'DEV_PORT', defaultValue: '8182', description: 'Dev HTTP port')
+    string(name: 'STAGE_PORT', defaultValue: '8183', description: 'Staging HTTP port')
+    string(name: 'DEV_DB_PORT', defaultValue: '1621', description: 'Dev H2 TCP port')
+    string(name: 'STAGE_DB_PORT', defaultValue: '1622', description: 'Stage H2 TCP port')
+    string(name: 'DEV_DB_WEB_PORT', defaultValue: '8285', description: 'Dev H2 Web Console port')
+    string(name: 'STAGE_DB_WEB_PORT', defaultValue: '8286', description: 'Stage H2 Web Console port')
+    string(name: 'DEV_DB_NAME', defaultValue: 'library_dev', description: 'Dev DB name')
+    string(name: 'STAGE_DB_NAME', defaultValue: 'library_stage', description: 'Stage DB name')
+    string(name: 'DB_USER', defaultValue: 'sa', description: 'H2 username')
+    password(name: 'DB_PASSWORD', defaultValue: 'password', description: 'H2 password')
+  }
+
+  environment {
+    COMMIT_SHORT = "${env.GIT_COMMIT?.take(7) ?: 'local'}"
+    IMAGE_TAG    = "${params.DOCKER_IMAGE}:${env.BUILD_NUMBER}-${COMMIT_SHORT}"
+  }
+
+  stages {
+    stage('Checkout & Build') {
+      steps {
+        checkout([$class: 'GitSCM',
+          userRemoteConfigs: [[url: 'https://github.com/BotHeya/ODSOFT.git', credentialsId: 'github-odsoft-pat']],
+          branches: [[name: '*/main']]
+        ])
+
+        sh '''
+          echo "Library Management System - LXD Pipeline"
+          echo "Commit: $(git --no-pager log -1 --oneline)"
+          echo "Build: ${BUILD_NUMBER}"
+          chmod +x mvnw
+          ./mvnw -B clean package -DskipTests
+          ls -lah target/*.jar
+        '''
+      }
+    }
+
+    stage('Build Docker Image') {
+      steps {
+        script {
+          writeFile file: 'Dockerfile', text: """FROM eclipse-temurin:17-jre-alpine
+WORKDIR /app
+COPY target/${params.JAR_NAME} app.jar
+RUN adduser -D app && chown -R app:app /app
+USER app
+EXPOSE 8080
+ENTRYPOINT ["java","-jar","/app/app.jar"]"""
+          
+          sh "docker build -t ${env.IMAGE_TAG} ."
+          
+          if (params.PUSH_IMAGE) {
+            withCredentials([usernamePassword(credentialsId: 'dockerhub-credentials-id', usernameVariable: 'DHU', passwordVariable: 'DHP')]) {
+              sh """
+                echo "$DHP" | docker login -u "$DHU" --password-stdin
+                docker push ${env.IMAGE_TAG}
+                docker logout
+              """
+            }
+          }
+        }
+      }
+    }
+
+    stage('Create Ubuntu Container with Network Fix') {
+      when { expression { params.VM_DEPLOY } }
+      steps {
+        sh """
+          echo "=== Creating Ubuntu LXD Container with Network Fix ==="
+          
+          # Delete existing container if it exists
+          sudo lxc delete ${params.VM_NAME} --force || true
+          
+          echo "Launching Ubuntu 22.04 container..."
+          sudo lxc launch ubuntu:22.04 ${params.VM_NAME}
+          
+          # Wait for container to be ready
+          echo "Waiting for container to start..."
+          sleep 30
+          
+          # Configure DNS in the container
+          sudo lxc exec ${params.VM_NAME} -- bash -c '
+            echo "Configuring DNS..."
+            echo "nameserver 8.8.8.8" > /etc/resolv.conf
+            echo "nameserver 8.8.4.4" >> /etc/resolv.conf
+            chattr +i /etc/resolv.conf 2>/dev/null || true
+          '
+          
+          echo "Container created with DNS configuration"
+        """
+      }
+    }
+
+    stage('Install Docker in Container') {
+      when { expression { params.VM_DEPLOY } }
+      steps {
+        sh '''
+          echo "=== Installing Docker in Container ==="
+          
+          # Install Docker in the container with retry logic
+          sudo lxc exec ''' + params.VM_NAME + ''' -- bash -c "
+            set -e
+            echo 'Testing network connectivity...'
+            ping -c 3 8.8.8.8
+            
+            echo 'Updating package list with retry...'
+            for i in {1..5}; do
+              if apt-get update; then
+                echo 'Package list updated successfully'
+                break
+              else
+                echo \"Attempt \$i failed, retrying in 10 seconds...\"
+                sleep 10
+              fi
+            done
+            
+            echo 'Installing Docker...'
+            apt-get install -y docker.io
+            
+            echo 'Starting Docker service...'
+            systemctl enable docker
+            systemctl start docker
+            
+            echo 'Testing Docker installation...'
+            docker --version
+            
+            echo 'Docker installed successfully'
+          "
+        '''
+      }
+    }
+
+    stage('Deploy Development Environment') {
+      when { expression { params.VM_DEPLOY } }
+      steps {
+        sh '''
+          echo "=== Deploying Development Environment ==="
+          
+          sudo lxc exec ''' + params.VM_NAME + ''' -- bash -c "
+            set -e
+            echo 'Starting Development Deployment...'
+            
+            # Create directories
+            mkdir -p /var/lib/''' + params.APP_NAME + '''/dev-h2-data
+            
+            # Create Docker network
+            docker network create ''' + params.APP_NAME + '''-network 2>/dev/null || true
+
+            echo 'Cleaning existing containers...'
+            docker rm -f ''' + params.APP_NAME + '''-dev-app ''' + params.APP_NAME + '''-dev-db 2>/dev/null || true
+
+            echo 'Starting H2 Database...'
+            docker run -d --name ''' + params.APP_NAME + '''-dev-db \\
+              --network ''' + params.APP_NAME + '''-network \\
+              -p ''' + params.DEV_DB_PORT + ''':''' + params.DEV_DB_PORT + ''' \\
+              -p ''' + params.DEV_DB_WEB_PORT + ''':''' + params.DEV_DB_WEB_PORT + ''' \\
+              -v /var/lib/''' + params.APP_NAME + '''/dev-h2-data:/opt/h2-data \\
+              -e H2_DATABASE_NAME=''' + params.DEV_DB_NAME + ''' \\
+              -e H2_OPTIONS=\"-ifNotExists -tcp -tcpAllowOthers -tcpPort ''' + params.DEV_DB_PORT + ''' -web -webAllowOthers -webPort ''' + params.DEV_DB_WEB_PORT + ''' -baseDir /opt/h2-data\" \\
+              oscarfonts/h2:latest
+
+            sleep 20
+
+            echo 'Starting Application...'
+            docker run -d --name ''' + params.APP_NAME + '''-dev-app \\
+              --network ''' + params.APP_NAME + '''-network \\
+              -p ''' + params.DEV_PORT + ''':''' + params.DEV_PORT + ''' \\
+              -e SPRING_PROFILES_ACTIVE=dev \\
+              -e SERVER_PORT=''' + params.DEV_PORT + ''' \\
+              -e SPRING_DATASOURCE_URL=\"jdbc:h2:tcp://''' + params.APP_NAME + '''-dev-db:''' + params.DEV_DB_PORT + '''/./''' + params.DEV_DB_NAME + ''';DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE\" \\
+              -e SPRING_DATASOURCE_USERNAME=\"''' + params.DB_USER + '''\" \\
+              -e SPRING_DATASOURCE_PASSWORD=\"''' + params.DB_PASSWORD + '''\" \\
+              -e SPRING_JPA_HIBERNATE_DDL_AUTO=update \\
+              -e SPRING_H2_CONSOLE_ENABLED=true \\
+              -e SPRING_H2_CONSOLE_PATH=/h2-console \\
+              --restart unless-stopped \\
+              ''' + env.IMAGE_TAG + '''
+
+            echo 'Development deployment complete!'
+            echo \"App: http://localhost:''' + params.DEV_PORT + '''\"
+            echo \"H2 Console: http://localhost:''' + params.DEV_DB_WEB_PORT + '''\"
+            
+            docker ps
+          "
+        '''
+      }
+    }
+
+    stage('Configure Port Forwarding') {
+      when { expression { params.VM_DEPLOY } }
+      steps {
+        sh """
+          echo "=== Configuring Port Forwarding ==="
+          
+          # Forward ports from container to host
+          sudo lxc config device remove ${params.VM_NAME} dev-app 2>/dev/null || true
+          sudo lxc config device remove ${params.VM_NAME} dev-db 2>/dev/null || true
+          sudo lxc config device remove ${params.VM_NAME} dev-h2-web 2>/dev/null || true
+          sudo lxc config device remove ${params.VM_NAME} stage-app 2>/dev/null || true
+          sudo lxc config device remove ${params.VM_NAME} stage-db 2>/dev/null || true
+          sudo lxc config device remove ${params.VM_NAME} stage-h2-web 2>/dev/null || true
+          
+          sudo lxc config device add ${params.VM_NAME} dev-app proxy listen=tcp:0.0.0.0:${params.DEV_PORT} connect=tcp:127.0.0.1:${params.DEV_PORT}
+          sudo lxc config device add ${params.VM_NAME} dev-db proxy listen=tcp:0.0.0.0:${params.DEV_DB_PORT} connect=tcp:127.0.0.1:${params.DEV_DB_PORT}
+          sudo lxc config device add ${params.VM_NAME} dev-h2-web proxy listen=tcp:0.0.0.0:${params.DEV_DB_WEB_PORT} connect=tcp:127.0.0.1:${params.DEV_DB_WEB_PORT}
+          
+          sudo lxc config device add ${params.VM_NAME} stage-app proxy listen=tcp:0.0.0.0:${params.STAGE_PORT} connect=tcp:127.0.0.1:${params.STAGE_PORT}
+          sudo lxc config device add ${params.VM_NAME} stage-db proxy listen=tcp:0.0.0.0:${params.STAGE_DB_PORT} connect=tcp:127.0.0.1:${params.STAGE_DB_PORT}
+          sudo lxc config device add ${params.VM_NAME} stage-h2-web proxy listen=tcp:0.0.0.0:${params.STAGE_DB_WEB_PORT} connect=tcp:127.0.0.1:${params.STAGE_DB_WEB_PORT}
+          
+          echo "Port forwarding configured"
+        """
+      }
+    }
+
+    stage('Show Access Information') {
+      when { expression { params.VM_DEPLOY } }
+      steps {
+        sh """
+          echo "=== Access Information ==="
+          CONTAINER_IP=\$(sudo lxc list ${params.VM_NAME} -c 4 --format csv | head -1)
+          HOST_IP=\$(hostname -I | awk '{print \$1}')
+          
+          echo "Container Name: ${params.VM_NAME}"
+          echo "Container IP: \$CONTAINER_IP"
+          echo "Host IP: \$HOST_IP"
+          echo ""
+          echo "Access your applications:"
+          echo "- Development App: http://\$HOST_IP:${params.DEV_PORT}"
+          echo "- Staging App: http://\$HOST_IP:${params.STAGE_PORT}"
+          echo "- Dev H2 Console: http://\$HOST_IP:${params.DEV_DB_WEB_PORT}"
+          echo "- Stage H2 Console: http://\$HOST_IP:${params.STAGE_DB_WEB_PORT}"
+          echo ""
+          echo "Deployment completed successfully!"
+        """
+      }
+    }
+  }
+
+  post {
+    always {
+      echo "Pipeline completed. Image: ${env.IMAGE_TAG}"
+    }
+  }
+}
