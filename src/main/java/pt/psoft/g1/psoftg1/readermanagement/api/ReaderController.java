@@ -17,6 +17,7 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.Authentication;
+import org.springframework.security.core.GrantedAuthority;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.context.request.WebRequest;
 import org.springframework.web.multipart.MultipartFile;
@@ -37,10 +38,6 @@ import pt.psoft.g1.psoftg1.shared.api.ListResponse;
 import pt.psoft.g1.psoftg1.shared.services.ConcurrencyService;
 import pt.psoft.g1.psoftg1.shared.services.FileStorageService;
 import pt.psoft.g1.psoftg1.shared.services.SearchRequest;
-import pt.psoft.g1.psoftg1.usermanagement.model.Librarian;
-import pt.psoft.g1.psoftg1.usermanagement.model.Role;
-import pt.psoft.g1.psoftg1.usermanagement.model.User;
-import pt.psoft.g1.psoftg1.usermanagement.services.UserService;
 
 import java.time.LocalDate;
 import java.util.ArrayList;
@@ -53,8 +50,8 @@ import java.util.Optional;
 @RequiredArgsConstructor
 @RequestMapping("/api/readers")
 class ReaderController {
+    
     private final ReaderService readerService;
-    private final UserService userService;
     private final ReaderViewMapper readerViewMapper;
     private final LendingService lendingService;
     private final LendingViewMapper lendingViewMapper;
@@ -62,18 +59,45 @@ class ReaderController {
     private final FileStorageService fileStorageService;
     private final ApiNinjasService apiNinjasService;
 
+    // Local role constants
+    private static final String ROLE_LIBRARIAN = "LIBRARIAN";
+    private static final String ROLE_READER = "READER";
+
+    // Internal wrapper for authenticated user details
+    private static class AuthenticatedUser {
+        private final String username;
+        private final List<String> authorities;
+
+        public AuthenticatedUser(Authentication authentication) {
+            this.username = authentication.getName();
+            this.authorities = authentication.getAuthorities().stream()
+                    .map(GrantedAuthority::getAuthority)
+                    .toList();
+        }
+
+        public String getUsername() {
+            return username;
+        }
+
+        public boolean isLibrarian() {
+            return authorities.contains("ROLE_" + ROLE_LIBRARIAN);
+        }
+    }
+
+    private AuthenticatedUser getAuthenticatedUser(Authentication authentication) {
+        return new AuthenticatedUser(authentication);
+    }
+
     @Operation(summary = "Gets the reader data if authenticated as Reader or all readers if authenticated as Librarian")
     @ApiResponse(description = "Success", responseCode = "200", content = { @Content(mediaType = "application/json",
-            // Use the `array` property instead of `schema`
             array = @ArraySchema(schema = @Schema(implementation = ReaderView.class))) })
     @GetMapping
     public ResponseEntity<?> getData(Authentication authentication) {
-        User loggedUser = userService.getAuthenticatedUser(authentication);
+        AuthenticatedUser loggedUser = getAuthenticatedUser(authentication);
 
-        if (!(loggedUser instanceof Librarian)) {
+        if (!loggedUser.isLibrarian()) {
             ReaderDetails readerDetails = readerService.findByUsername(loggedUser.getUsername())
                     .orElseThrow(() -> new NotFoundException(ReaderDetails.class, loggedUser.getUsername()));
-            //return new ListResponse<>(readerViewMapper.toReaderView(readerService.findAll()));
             return ResponseEntity.ok().eTag(Long.toString(readerDetails.getVersion())).body(readerViewMapper.toReaderView(readerDetails));
         }
 
@@ -82,11 +106,8 @@ class ReaderController {
 
     @Operation(summary = "Gets reader by number")
     @ApiResponse(description = "Success", responseCode = "200", content = { @Content(mediaType = "application/json",
-            // Use the `array` property instead of `schema`
             array = @ArraySchema(schema = @Schema(implementation = ReaderView.class))) })
     @GetMapping(value="/{year}/{seq}")
-    //This is just for testing purposes, therefore admin role has been set
-    //@RolesAllowed(Role.LIBRARIAN)
     public ResponseEntity<ReaderQuoteView> findByReaderNumber(@PathVariable("year")
                                                            @Parameter(description = "The year of the Reader to find")
                                                            final Integer year,
@@ -122,18 +143,11 @@ class ReaderController {
         return new ListResponse<>(readerViewMapper.toReaderView(readerDetailsList));
     }
 
-    @RolesAllowed(Role.LIBRARIAN)
+    @RolesAllowed(ROLE_LIBRARIAN)
     @GetMapping(params = "name")
     public ListResponse<ReaderView> findByReaderName(@RequestParam("name") final String name) {
-        List<User> userList = this.userService.findByNameLike(name);
-        List<ReaderDetails> readerDetailsList = new ArrayList<>();
-
-        for(User user : userList) {
-            Optional<ReaderDetails> readerDetails = this.readerService.findByUsername(user.getUsername());
-            if(readerDetails.isPresent()) {
-                readerDetailsList.add(readerDetails.get());
-            }
-        }
+        // Replaced UserService call with ReaderService search
+        List<ReaderDetails> readerDetailsList = this.readerService.searchReaders(null, new SearchReadersQuery(name, null, null));
 
         if(readerDetailsList.isEmpty()) {
             throw new NotFoundException("Could not find reader with name: " + name);
@@ -148,14 +162,14 @@ class ReaderController {
     public ResponseEntity<byte[]> getSpecificReaderPhoto(@PathVariable("year")
                                                      @Parameter(description = "The year of the Reader to find")
                                                      final Integer year,
-                                                 @PathVariable("seq")
+                                                     @PathVariable("seq")
                                                      @Parameter(description = "The sequencial of the Reader to find")
                                                      final Integer seq,
-                                                         Authentication authentication) {
-        User loggedUser = userService.getAuthenticatedUser(authentication);
+                                                     Authentication authentication) {
+        AuthenticatedUser loggedUser = getAuthenticatedUser(authentication);
 
         //if Librarian is logged in, skip ahead
-        if (!(loggedUser instanceof Librarian)) {
+        if (!loggedUser.isLibrarian()) {
             final var loggedReaderDetails = readerService.findByUsername(loggedUser.getUsername())
                     .orElseThrow(() -> new NotFoundException(ReaderDetails.class, loggedUser.getUsername()));
 
@@ -189,7 +203,7 @@ class ReaderController {
     @ResponseStatus(HttpStatus.OK)
     public ResponseEntity<byte[]> getReaderOwnPhoto(Authentication authentication) {
 
-        User loggedUser = userService.getAuthenticatedUser(authentication);
+        AuthenticatedUser loggedUser = getAuthenticatedUser(authentication);
 
         Optional<ReaderDetails> optReaderDetails = readerService.findByUsername(loggedUser.getUsername());
         if(optReaderDetails.isEmpty()) {
@@ -236,7 +250,7 @@ class ReaderController {
     @Operation(summary = "Deletes a reader photo")
     @DeleteMapping("/photo")
     public ResponseEntity<Void> deleteReaderPhoto(Authentication authentication) {
-        User loggedUser = userService.getAuthenticatedUser(authentication);
+        AuthenticatedUser loggedUser = getAuthenticatedUser(authentication);
 
         Optional<ReaderDetails> optReaderDetails = readerService.findByUsername(loggedUser.getUsername());
         if(optReaderDetails.isEmpty()) {
@@ -256,7 +270,7 @@ class ReaderController {
     }
 
     @Operation(summary = "Updates a reader")
-    @RolesAllowed(Role.READER)
+    @RolesAllowed(ROLE_READER)
     @PatchMapping
     public ResponseEntity<ReaderView> updateReader(
             @Valid UpdateReaderRequest readerRequest,
@@ -273,9 +287,14 @@ class ReaderController {
 
         String fileName = this.fileStorageService.getRequestPhoto(file);
 
-        User loggedUser = userService.getAuthenticatedUser(authentication);
+        AuthenticatedUser loggedUser = getAuthenticatedUser(authentication);
+        
+        // Find the reader details for the logged user to get the internal ID required for update
+        ReaderDetails currentReaderDetails = readerService.findByUsername(loggedUser.getUsername())
+                .orElseThrow(() -> new NotFoundException(ReaderDetails.class, loggedUser.getUsername()));
+
         ReaderDetails readerDetails = readerService
-                .update(loggedUser.getId(), readerRequest, concurrencyService.getVersionFromIfMatchHeader(ifMatchValue), fileName);
+                .update(currentReaderDetails.getId(), readerRequest, concurrencyService.getVersionFromIfMatchHeader(ifMatchValue), fileName);
 
         return ResponseEntity.ok()
                 .eTag(Long.toString(readerDetails.getVersion()))
@@ -304,10 +323,10 @@ class ReaderController {
         final var urlReaderDetails = readerService.findByReaderNumber(urlReaderNumber)
                 .orElseThrow(() -> new NotFoundException(Lending.class, urlReaderNumber));
 
-        User loggedUser = userService.getAuthenticatedUser(authentication);
+        AuthenticatedUser loggedUser = getAuthenticatedUser(authentication);
 
         //if Librarian is logged in, skip ahead
-        if (!(loggedUser instanceof Librarian)) {
+        if (!loggedUser.isLibrarian()) {
             final var loggedReaderDetails = readerService.findByUsername(loggedUser.getUsername())
                     .orElseThrow(() -> new NotFoundException(ReaderDetails.class, loggedUser.getUsername()));
 

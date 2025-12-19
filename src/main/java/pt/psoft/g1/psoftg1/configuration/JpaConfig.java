@@ -22,16 +22,13 @@ import org.springframework.transaction.annotation.EnableTransactionManagement;
 public class JpaConfig {
 
     /**
-     * in case there is no authenticated user, for instance during bootstrapping, we
-     * will write SYSTEM
+     * in case there is no authenticated user, for instance during bootstrapping, we will write SYSTEM
      *
      * @return
      */
     @Bean("auditorProvider")
     public AuditorAware<String> auditorProvider() {
-        return () -> Optional.ofNullable(SecurityContextHolder.getContext())
-                .map(SecurityContext::getAuthentication)
-                .map(Authentication::getName)
-                .or(() -> Optional.of("SYSTEM"));
+        return () -> Optional.ofNullable(SecurityContextHolder.getContext()).map(SecurityContext::getAuthentication)
+                .map(Authentication::getName).or(() -> Optional.of("SYSTEM"));
     }
 }

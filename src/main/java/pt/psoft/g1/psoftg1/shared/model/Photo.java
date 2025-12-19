@@ -27,4 +27,3 @@ public class Photo {
         setPhotoFile(photoPath.toString());
     }
 }
-
