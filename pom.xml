@@ -9,10 +9,10 @@
 		<relativePath/> <!-- lookup parent from repository -->
 	</parent>
 	<groupId>pt.psoft.g1</groupId>
-	<artifactId>psoft-g1</artifactId>
+	<artifactId>lms-lending-reader</artifactId>
 	<version>0.0.1-SNAPSHOT</version>
-	<name>psoft-g1</name>
-	<description>Demo project for Spring Boot</description>
+	<name>lms-lending-reader</name>
+	<description>Lending Reader Microservice</description>
 
 	<properties>
 		<java.version>21</java.version>
@@ -32,6 +32,33 @@
 		</dependency>
 
     <dependency>
+      <groupId>au.com.dius.pact.provider</groupId>
+      <artifactId>junit5</artifactId>
+      <version>4.6.15</version> <!-- Use the latest version -->
+  </dependency>
+
+  <dependency>
+      <groupId>au.com.dius.pact.consumer</groupId>
+      <artifactId>junit5</artifactId>
+      <version>4.6.15</version> <!-- Use the latest version -->
+  </dependency>
+
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-amqp</artifactId>
+    </dependency>
+
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-hateoas</artifactId>
+    </dependency>
+
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-actuator</artifactId>
+    </dependency>
+
+    <dependency>
       <groupId>org.mockito</groupId><artifactId>mockito-junit-jupiter</artifactId><version>5.11.0</version><scope>test</scope>
     </dependency>
     <dependency>
@@ -49,16 +76,23 @@
 		</dependency>
 
     <dependency>
-      <groupId>org.postgresql</groupId>
-      <artifactId>postgresql</artifactId>
-      <scope>runtime</scope>
+        <groupId>org.postgresql</groupId>
+        <artifactId>postgresql</artifactId>
+        <scope>runtime</scope>
     </dependency>
 
+    <dependency>
+      <groupId>org.mockito</groupId>
+      <artifactId>mockito-core</artifactId>
+      <scope>test</scope>
+  </dependency>
+
 		<!-- database drivers -->
-		<dependency>
-			<groupId>com.h2database</groupId>
-			<artifactId>h2</artifactId>
-		</dependency>
+    <dependency>
+        <groupId>com.h2database</groupId>
+        <artifactId>h2</artifactId>
+        <scope>runtime</scope> 
+    </dependency>
 
 		<!-- security, authentication & authorization -->
 		<dependency>
@@ -122,11 +156,15 @@
 
 <build>
   <plugins>
-    <!-- Spring Boot -->
-    <plugin>
+      <!-- Spring Boot -->
+      <plugin>
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-maven-plugin</artifactId>
-    </plugin>
+      <configuration>
+          <mainClass>pt.psoft.g1.psoftg1.LmsLendingReadingApplication</mainClass>
+          <layout>ZIP</layout>
+      </configuration>
+  </plugin>
 
     <!-- Unit tests: run fast tests here -->
     <plugin>
@@ -148,6 +186,19 @@
         </systemPropertyVariables>
       </configuration>
     </plugin>
+
+    <plugin>
+      <groupId>org.apache.maven.plugins</groupId>
+      <artifactId>maven-jar-plugin</artifactId>
+      <version>3.2.0</version>
+      <configuration>
+          <archive>
+              <manifest>
+                  <mainClass>pt.psoft.g1.psoftg1.LmsLendingReadingApplication</mainClass>
+              </manifest>
+          </archive>
+      </configuration>
+  </plugin>
 
     <!-- Integration tests: run here, during verify -->
     <plugin>

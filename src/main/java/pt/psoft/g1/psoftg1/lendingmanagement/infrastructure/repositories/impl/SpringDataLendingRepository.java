@@ -1,7 +1,6 @@
 package pt.psoft.g1.psoftg1.lendingmanagement.infrastructure.repositories.impl;
 
 import jakarta.persistence.EntityManager;
-import jakarta.persistence.Tuple;
 import jakarta.persistence.TypedQuery;
 import jakarta.persistence.criteria.*;
 import lombok.RequiredArgsConstructor;
@@ -9,38 +8,30 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.CrudRepository;
 import org.springframework.data.repository.query.Param;
 import org.springframework.util.StringUtils;
-import pt.psoft.g1.psoftg1.bookmanagement.model.Book;
-import pt.psoft.g1.psoftg1.genremanagement.services.GenreLendingsDTO;
-import pt.psoft.g1.psoftg1.genremanagement.services.GenreLendingsPerMonthDTO;
 import pt.psoft.g1.psoftg1.lendingmanagement.model.Lending;
 import pt.psoft.g1.psoftg1.lendingmanagement.repositories.LendingRepository;
 import pt.psoft.g1.psoftg1.readermanagement.model.ReaderDetails;
-import pt.psoft.g1.psoftg1.readermanagement.services.ReaderAverageDto;
-import pt.psoft.g1.psoftg1.readermanagement.services.ReaderLendingsAvgPerMonthDto;
 import pt.psoft.g1.psoftg1.shared.services.Page;
-import pt.psoft.g1.psoftg1.usermanagement.model.User;
 
 import java.time.LocalDate;
-import java.time.LocalDateTime;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Optional;
 
 public interface SpringDataLendingRepository extends LendingRepository, LendingRepoCustom, CrudRepository<Lending, Long> {
     @Override
     @Query("SELECT l " +
             "FROM Lending l " +
-            "WHERE l.lendingNumber.lendingNumber = :lendingNumber")
-    Optional<Lending> findByLendingNumber(String lendingNumber);
-
-    //http://www.h2database.com/html/commands.html
+            "WHERE l.lendingNumber = :lendingNumber")
+    Optional<Lending> findByLendingNumber(@Param("lendingNumber") String lendingNumber);
 
     @Override
     @Query("SELECT l " +
             "FROM Lending l " +
-            "JOIN Book b ON l.book.pk = b.pk " +
-            "JOIN ReaderDetails r ON l.readerDetails.pk = r.pk " +
-            "WHERE b.isbn.isbn = :isbn " +
+            "JOIN l.readerDetails r " +
+            "WHERE l.bookIsbn = :isbn " +
             "AND r.readerNumber.readerNumber = :readerNumber ")
-    List<Lending> listByReaderNumberAndIsbn(String readerNumber, String isbn);
+    List<Lending> listByReaderNumberAndIsbn(@Param("readerNumber") String readerNumber, @Param("isbn") String isbn);
 
     @Override
     @Query("SELECT COUNT (l) " +
@@ -51,47 +42,83 @@ public interface SpringDataLendingRepository extends LendingRepository, LendingR
     @Override
     @Query("SELECT l " +
             "FROM Lending l " +
-                "JOIN ReaderDetails r ON l.readerDetails.pk = r.pk " +
+            "JOIN l.readerDetails r " +
             "WHERE r.readerNumber.readerNumber = :readerNumber " +
-                "AND l.returnedDate IS NULL")
+            "AND l.returnedDate IS NULL")
     List<Lending> listOutstandingByReaderNumber(@Param("readerNumber") String readerNumber);
 
     @Override
     @Query(value =
-            "SELECT AVG(DATEDIFF(day, l.start_date, l.returned_date)) " +
-            "FROM Lending l"
+            "SELECT AVG(DATEDIFF('DAY', l.start_date, l.returned_date)) " +
+            "FROM Lending l " +
+            "WHERE l.returned_date IS NOT NULL"
             , nativeQuery = true)
     Double getAverageDuration();
 
     @Override
     @Query(value =
-            "SELECT AVG(DATEDIFF(day, l.start_date, l.returned_date)) " +
+            "SELECT AVG(DATEDIFF('DAY', l.start_date, l.returned_date)) " +
                     "FROM Lending l " +
-                    "JOIN BOOK b ON l.BOOK_PK = b.PK " +
-                    "WHERE b.ISBN = :isbn"
+                    "WHERE l.book_isbn = :isbn " +
+                    "AND l.returned_date IS NOT NULL"
             , nativeQuery = true)
     Double getAvgLendingDurationByIsbn(@Param("isbn") String isbn);
 
+    // Implement default methods required by the LendingRepository interface if they are not covered by Spring Data magic
+    // Note: If you have default methods in the interface, you don't need to implement them here explicitly unless overriding.
+    // However, for strict compilation if using the previous interface definition:
 
+    @Override
+    @Query("SELECT l FROM Lending l WHERE l.readerDetails = :readerDetails AND l.bookIsbn = :isbn " +
+            "AND (:returned IS NULL " +
+            "OR (:returned = true AND l.returnedDate IS NOT NULL) " +
+            "OR (:returned = false AND l.returnedDate IS NULL))")
+    List<Lending> listByReaderDetailsAndIsbnRaw(@Param("readerDetails") ReaderDetails readerDetails,
+                                                @Param("isbn") String isbn,
+                                                @Param("returned") Boolean returned);
+
+    @Override
+    @Query("SELECT l FROM Lending l WHERE l.readerDetails = :readerDetails AND l.returnedDate IS NULL AND l.limitDate < CURRENT_DATE")
+    List<Lending> listOverdue(@Param("readerDetails") ReaderDetails readerDetails);
+
+    @Override
+    @Query("SELECT count(l) FROM Lending l WHERE l.readerDetails = :readerDetails AND l.returnedDate IS NULL")
+    long countOutstanding(@Param("readerDetails") ReaderDetails readerDetails);
+
+    @Override
+    @Query("SELECT l FROM Lending l WHERE l.returnedDate IS NULL")
+    List<Lending> listOutstanding();
+
+    @Override
+    @Query("SELECT l FROM Lending l WHERE " +
+            "(:readerNumber IS NULL OR l.readerDetails.readerNumber.readerNumber = :readerNumber) AND " +
+            "(:isbn IS NULL OR l.bookIsbn = :isbn) AND " +
+            "(:startDate IS NULL OR l.startDate >= :startDate) AND " +
+            "(:endDate IS NULL OR l.startDate <= :endDate) AND " +
+            "(:returned IS NULL OR (:returned = true AND l.returnedDate IS NOT NULL) OR (:returned = false AND l.returnedDate IS NULL))")
+    List<Lending> searchLendingsRaw(org.springframework.data.domain.Pageable pageable,
+                                    @Param("readerNumber") String readerNumber,
+                                    @Param("isbn") String isbn,
+                                    @Param("returned") Boolean returned,
+                                    @Param("startDate") LocalDate startDate,
+                                    @Param("endDate") LocalDate endDate);
+
+    @Override
+    @Query("SELECT l FROM Lending l WHERE l.returnedDate IS NULL AND l.limitDate < CURRENT_DATE")
+    List<Lending> getOverdueRaw(org.springframework.data.domain.Pageable pageable);
 }
 
 interface LendingRepoCustom {
     List<Lending> getOverdue(Page page);
     List<Lending> searchLendings(Page page, String readerNumber, String isbn, Boolean returned, LocalDate startDate, LocalDate endDate);
-//    List<ReaderAverageDto> getAverageMonthlyPerReader(LocalDate startDate, LocalDate endDate);
-
 }
 
 @RequiredArgsConstructor
 class LendingRepoCustomImpl implements LendingRepoCustom {
-    // get the underlying JPA Entity Manager via spring thru constructor dependency
-    // injection
     private final EntityManager em;
 
     @Override
-    public List<Lending> getOverdue(Page page)
-    {
-
+    public List<Lending> getOverdue(Page page) {
         final CriteriaBuilder cb = em.getCriteriaBuilder();
         final CriteriaQuery<Lending> cq = cb.createQuery(Lending.class);
         final Root<Lending> root = cq.from(Lending.class);
@@ -104,7 +131,7 @@ class LendingRepoCustomImpl implements LendingRepoCustom {
         where.add(cb.lessThan(root.get("limitDate"), LocalDate.now()));
 
         cq.where(where.toArray(new Predicate[0]));
-        cq.orderBy(cb.asc(root.get("limitDate"))); // Order by limitDate, oldest first
+        cq.orderBy(cb.asc(root.get("limitDate")));
 
         final TypedQuery<Lending> q = em.createQuery(cq);
         q.setFirstResult((page.getNumber() - 1) * page.getLimit());
@@ -113,11 +140,13 @@ class LendingRepoCustomImpl implements LendingRepoCustom {
         return q.getResultList();
     }
 
-    public List<Lending> searchLendings(Page page, String readerNumber, String isbn, Boolean returned, LocalDate startDate, LocalDate endDate){
+    @Override
+    public List<Lending> searchLendings(Page page, String readerNumber, String isbn, Boolean returned, LocalDate startDate, LocalDate endDate) {
         final CriteriaBuilder cb = em.getCriteriaBuilder();
         final CriteriaQuery<Lending> cq = cb.createQuery(Lending.class);
         final Root<Lending> lendingRoot = cq.from(Lending.class);
-        final Join<Lending, Book> bookJoin = lendingRoot.join("book");
+        
+        // Removed Join to Book entity
         final Join<Lending, ReaderDetails> readerDetailsJoin = lendingRoot.join("readerDetails");
         cq.select(lendingRoot);
 
@@ -125,18 +154,21 @@ class LendingRepoCustomImpl implements LendingRepoCustom {
 
         if (StringUtils.hasText(readerNumber))
             where.add(cb.like(readerDetailsJoin.get("readerNumber").get("readerNumber"), readerNumber));
+        
         if (StringUtils.hasText(isbn))
-            where.add(cb.like(bookJoin.get("isbn").get("isbn"), isbn));
-        if (returned != null){
-            if(returned){
+            // Changed to use the string field directly
+            where.add(cb.like(lendingRoot.get("bookIsbn"), isbn));
+            
+        if (returned != null) {
+            if (returned) {
                 where.add(cb.isNotNull(lendingRoot.get("returnedDate")));
-            }else{
+            } else {
                 where.add(cb.isNull(lendingRoot.get("returnedDate")));
             }
         }
-        if(startDate!=null)
+        if (startDate != null)
             where.add(cb.greaterThanOrEqualTo(lendingRoot.get("startDate"), startDate));
-        if(endDate!=null)
+        if (endDate != null)
             where.add(cb.lessThanOrEqualTo(lendingRoot.get("startDate"), endDate));
 
         cq.where(where.toArray(new Predicate[0]));
@@ -148,73 +180,4 @@ class LendingRepoCustomImpl implements LendingRepoCustom {
 
         return q.getResultList();
     }
-
-/*
-    @Override
-    public List<ReaderAverageDto> getAverageMonthlyPerReader(LocalDate startDate, LocalDate endDate) {
-        final CriteriaBuilder cb = em.getCriteriaBuilder();
-        final CriteriaQuery<Tuple> cq = cb.createTupleQuery();
-        final Root<Lending> lendingRoot = cq.from(Lending.class);
-        final Join<ReaderDetails, Lending> readerDetailsJoin = lendingRoot.join("readerDetails");
-        final Join<ReaderDetails, User> userJoin = readerDetailsJoin.join("user");
-
-        final List<Predicate> where = new ArrayList<>();
-
-        Expression<Integer> yearExpr = cb.function("YEAR", Integer.class, lendingRoot.get("startDate"));
-        Expression<Integer> monthExpr = cb.function("MONTH", Integer.class, lendingRoot.get("startDate"));
-
-        Expression<Double> lendingCount = cb.count(lendingRoot).as(Double.class);
-
-        Expression<Double> diffInMonths = cb.function(
-                "date_part", Double.class, cb.literal("month"),
-                cb.literal(LocalDate.now())
-        );
-
-        Expression<Double> lendingsAveragePerMonth = cb.diff(lendingCount, diffInMonths);
-
-
-
-        cq.multiselect(readerDetailsJoin, yearExpr, monthExpr, durationInMonths);
-
-        Expression<Long> durationInMonths = cb.quot(diffInDays, 30L);
-
-        if(startDate!=null)
-            where.add(cb.greaterThanOrEqualTo(lendingRoot.get("startDate"), startDate));
-        if(endDate!=null)
-            where.add(cb.lessThanOrEqualTo(lendingRoot.get("startDate"), endDate));
-
-        cq.where(where.toArray(new Predicate[0]));
-        cq.groupBy(readerDetailsJoin.get("readerNumber"), yearExpr, monthExpr);
-        cq.orderBy(cb.asc(lendingRoot.get("lendingNumber")));
-
-        List<Tuple> results = em.createQuery(cq).getResultList();
-        Map<Integer, Map<Integer, List<ReaderAverageDto>>> groupedResults = new HashMap<>();
-
-
-        for (Tuple result : results) {
-            ReaderDetails readerDetails = result.get(0, ReaderDetails.class);
-            int yearValue = result.get(1, Integer.class);
-            int monthValue = result.get(2, Integer.class);
-            Double averageDurationValue = result.get(3, Double.class);
-            ReaderAverageDto readerAverageDto = new ReaderAverageDto(genre, averageDurationValue);
-
-            groupedResults
-                    .computeIfAbsent(yearValue, k -> new HashMap<>())
-                    .computeIfAbsent(monthValue, k -> new ArrayList<>())
-                    .add(readerAverageDto);
-        }
-
-        List<ReaderLendingsAvgPerMonthDto> readerLendingsAvgPerMonthDtos = new ArrayList<>();
-        for (Map.Entry<Integer, Map<Integer, List<ReaderAverageDto>>> yearEntry : groupedResults.entrySet()) {
-            int yearValue = yearEntry.getKey();
-            for (Map.Entry<Integer, List<ReaderAverageDto>> monthEntry : yearEntry.getValue().entrySet()) {
-                int monthValue = monthEntry.getKey();
-                List<ReaderAverageDto> values = monthEntry.getValue();
-                readerLendingsAvgPerMonthDtos.add(new GenreLendingsPerMonthDTO(yearValue, monthValue, values));
-            }
-        }
-
-
-        return null;
-    }*/
 }

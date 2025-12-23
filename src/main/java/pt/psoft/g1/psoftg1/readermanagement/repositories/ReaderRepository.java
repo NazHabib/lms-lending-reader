@@ -17,14 +17,9 @@ import java.util.Optional;
  */
 public interface ReaderRepository {
     Optional<ReaderDetails> findByReaderNumber(@Param("readerNumber") @NotNull String readerNumber);
-    List<ReaderDetails> findByPhoneNumber(@Param("phoneNumber") @NotNull String phoneNumber);
     Optional<ReaderDetails> findByUsername(@Param("username") @NotNull String username);
     Optional<ReaderDetails> findByUserId(@Param("userId") @NotNull Long userId);
-    int getCountFromCurrentYear();
+    //int getCountFromCurrentYear();
     ReaderDetails save(ReaderDetails readerDetails);
     Iterable<ReaderDetails> findAll();
-    Page<ReaderDetails> findTopReaders(Pageable pageable);
-    Page<ReaderBookCountDTO> findTopByGenre(Pageable pageable, String genre, LocalDate startDate, LocalDate endDate);
-    void delete(ReaderDetails readerDetails);
-    List<ReaderDetails> searchReaderDetails(pt.psoft.g1.psoftg1.shared.services.Page page, SearchReadersQuery query);
 }

@@ -1,17 +1,28 @@
-package pt.psoft.g1.psoftg1.readermanagement.services;
+package pt.psoft.g1.psoftg1.readermanagement.api;
 
+import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.annotation.Nullable;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
-import lombok.*;
+import lombok.Data;
+import lombok.NonNull;
 import org.springframework.format.annotation.DateTimeFormat;
-import org.springframework.web.multipart.MultipartFile;
-
-import java.util.List;
 
 @Data
-@NoArgsConstructor
-public class CreateReaderRequest {
+@Schema(description = "A Reader form AMQP communication")
+public class ReaderViewAMQP {
+    @NotBlank
+    @NonNull
+    private String readerNumber;
+
+    @NotBlank
+    @NonNull
+    private Long version;
+
+    @NotBlank
+    @NonNull
+    private Long userId;
+
     @NotBlank
     @Email
     @NonNull
@@ -35,33 +46,20 @@ public class CreateReaderRequest {
     private String phoneNumber;
 
     @Nullable
-    @Getter
-    @Setter
-    private MultipartFile photo;
+    private String photoURI;
 
-    @Setter
     private boolean gdpr;
 
-    @Setter
     private boolean marketing;
 
-    @Setter
     private boolean thirdParty;
 
-    @Nullable
-    @Getter
-    @Setter
-    private List<String> interestList;
+//    @Nullable
+//    @Getter
+//    @Setter
+//    private List<String> interestList;
 
-    public boolean getThirdParty() {
-        return thirdParty;
-    }
+    public ReaderViewAMQP(){
 
-    public boolean getMarketing() {
-        return marketing;
-    }
-
-    public boolean getGdpr() {
-        return gdpr;
     }
 }

@@ -52,4 +52,15 @@ public abstract class MapperInterface {
         readerLink.put("href", readerUri);
         return readerLink;
     }
+
+    //    @Named(value = "authorLink")
+    //    protected Map<String, String> mapAuthorLink(Author author){
+    //        Map<String, String> authorLink = new HashMap<>();
+    //        String authorUri = ServletUriComponentsBuilder.fromCurrentContextPath()
+    //                .path("/api/authors/")
+    //                .path(author.getAuthorNumber().toString())
+    //                .toUriString();
+    //        authorLink.put("href", authorUri);
+    //        return authorLink;
+    //    }
 }

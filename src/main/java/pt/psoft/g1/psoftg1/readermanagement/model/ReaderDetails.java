@@ -1,16 +1,14 @@
 package pt.psoft.g1.psoftg1.readermanagement.model;
 
-import jakarta.annotation.Nullable;
 import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.Setter;
 import pt.psoft.g1.psoftg1.exceptions.ConflictException;
-import pt.psoft.g1.psoftg1.genremanagement.model.Genre;
 import pt.psoft.g1.psoftg1.readermanagement.services.UpdateReaderRequest;
 import pt.psoft.g1.psoftg1.shared.model.EntityWithPhoto;
-import pt.psoft.g1.psoftg1.usermanagement.model.Reader;
 
 import java.nio.file.InvalidPathException;
+import java.util.ArrayList;
 import java.util.List;
 
 @Entity
@@ -20,11 +18,21 @@ public class ReaderDetails extends EntityWithPhoto {
     @GeneratedValue(strategy = GenerationType.AUTO)
     private Long pk;
 
+    @Version
+    @Getter
+    private Long version;
+
+    // Replaced @OneToOne Reader relationship with direct fields
     @Getter
     @Setter
-    @OneToOne
-    private Reader reader;
+    @Column(nullable = false, unique = true)
+    private String username;
 
+    @Getter
+    @Setter
+    private String fullName;
+
+    @Embedded
     private ReaderNumber readerNumber;
 
     @Embedded
@@ -49,17 +57,31 @@ public class ReaderDetails extends EntityWithPhoto {
     @Getter
     private boolean thirdPartySharingConsent;
 
-    @Version
-    @Getter
-    private Long version;
-
+    // Replaced List<Genre> entity with List<String> to store genre names or codes
+    // avoiding cross-service entity dependency
+    @ElementCollection
+    @CollectionTable(name = "reader_interests", joinColumns = @JoinColumn(name = "reader_pk"))
+    @Column(name = "interest")
     @Getter
     @Setter
-    @ManyToMany
-    private List<Genre> interestList;
+    private List<String> interestList = new ArrayList<>();
 
-    public ReaderDetails(int readerNumber, Reader reader, String birthDate, String phoneNumber, boolean gdpr, boolean marketing, boolean thirdParty, String photoURI, List<Genre> interestList) {
-        if(reader == null || phoneNumber == null) {
+    protected ReaderDetails() {
+        // for ORM only
+    }
+
+    public ReaderDetails(ReaderNumber readerNumber,
+                         BirthDate birthDate,
+                         PhoneNumber phoneNumber,
+                         String username,
+                         String fullName,
+                         boolean gdpr,
+                         boolean marketing,
+                         boolean thirdParty,
+                         String photoURI,
+                         List<String> interestList) {
+        
+        if(username == null || phoneNumber == null) {
             throw new IllegalArgumentException("Provided argument resolves to null object");
         }
 
@@ -67,68 +89,62 @@ public class ReaderDetails extends EntityWithPhoto {
             throw new IllegalArgumentException("Readers must agree with the GDPR rules");
         }
 
-        setReader(reader);
-        setReaderNumber(new ReaderNumber(readerNumber));
-        setPhoneNumber(new PhoneNumber(phoneNumber));
-        setBirthDate(new BirthDate(birthDate));
-        //By the client specifications, gdpr can only have the value of true. A setter will be created anyways in case we have accept no gdpr consent later on the project
+        this.readerNumber = readerNumber;
+        this.birthDate = birthDate;
+        this.phoneNumber = phoneNumber;
+        this.username = username;
+        this.fullName = fullName;
+        
+        //By the client specifications, gdpr can only have the value of true.
         setGdprConsent(true);
 
         setPhotoInternal(photoURI);
         setMarketingConsent(marketing);
         setThirdPartySharingConsent(thirdParty);
-        setInterestList(interestList);
-    }
-
-    private void setPhoneNumber(PhoneNumber number) {
-        if(number != null) {
-            this.phoneNumber = number;
+        
+        if (interestList != null) {
+            this.interestList = interestList;
         }
     }
 
-    private void setReaderNumber(ReaderNumber readerNumber) {
-        if(readerNumber != null) {
-            this.readerNumber = readerNumber;
-        }
+    // Simplified Constructor for Bootstrapping (matches previous suggestions)
+    public ReaderDetails(ReaderNumber readerNumber, BirthDate birthDate, PhoneNumber phoneNumber, boolean gdpr, boolean marketing, boolean thirdParty, String photoFilename) {
+        this.readerNumber = readerNumber;
+        this.birthDate = birthDate;
+        this.phoneNumber = phoneNumber;
+        this.gdprConsent = gdpr;
+        this.marketingConsent = marketing;
+        this.thirdPartySharingConsent = thirdParty;
+        setPhotoInternal(photoFilename);
     }
 
-    private void setBirthDate(BirthDate date) {
-        if(date != null) {
-            this.birthDate = date;
-        }
-    }
-
-    public void applyPatch(final long currentVersion, final UpdateReaderRequest request, String photoURI, List<Genre> interestList) {
+    public void applyPatch(final long currentVersion, final UpdateReaderRequest request, String photoURI, List<String> interestList) {
         if(currentVersion != this.version) {
             throw new ConflictException("Provided version does not match latest version of this object");
         }
 
-        String birthDate = request.getBirthDate();
-        String phoneNumber = request.getPhoneNumber();
+        String birthDateStr = request.getBirthDate();
+        String phoneNumberStr = request.getPhoneNumber();
         boolean marketing = request.getMarketing();
         boolean thirdParty = request.getThirdParty();
-        String fullName = request.getFullName();
-        String username = request.getUsername();
-        String password = request.getPassword();
+        String fullNameStr = request.getFullName();
+        String usernameStr = request.getUsername();
+        // Password update is handled by Auth service, ignored here.
 
-        if(username != null) {
-            this.reader.setUsername(username);
+        if(usernameStr != null) {
+            this.username = usernameStr;
         }
 
-        if(password != null) {
-            this.reader.setPassword(password);
+        if(fullNameStr != null) {
+            this.fullName = fullNameStr;
         }
 
-        if(fullName != null) {
-            this.reader.setName(fullName);
+        if(birthDateStr != null) {
+            this.birthDate = new BirthDate(birthDateStr);
         }
 
-        if(birthDate != null) {
-            setBirthDate(new BirthDate(birthDate));
-        }
-
-        if(phoneNumber != null) {
-            setPhoneNumber(new PhoneNumber(phoneNumber));
+        if(phoneNumberStr != null) {
+            this.phoneNumber = new PhoneNumber(phoneNumberStr);
         }
 
         if(marketing != this.marketingConsent) {
@@ -154,7 +170,6 @@ public class ReaderDetails extends EntityWithPhoto {
         if(desiredVersion != this.version) {
             throw new ConflictException("Provided version does not match latest version of this object");
         }
-
         setPhotoInternal(null);
     }
 
@@ -162,9 +177,11 @@ public class ReaderDetails extends EntityWithPhoto {
         return this.readerNumber.toString();
     }
 
-    public String getPhoneNumber() { return this.phoneNumber.toString();}
-
-    protected ReaderDetails() {
-        // for ORM only
+    public String getPhoneNumber() { 
+        return this.phoneNumber.toString();
+    }
+    
+    public Long getId() {
+        return this.pk;
     }
 }
