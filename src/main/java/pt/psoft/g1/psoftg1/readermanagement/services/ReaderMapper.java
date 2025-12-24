@@ -1,32 +1,27 @@
-//package pt.psoft.g1.psoftg1.readermanagement.services;
-//
-//import org.mapstruct.Mapper;
-//import org.mapstruct.Mapping;
-//import org.mapstruct.Named;
-//import org.springframework.web.multipart.MultipartFile;
-//
-//import pt.psoft.g1.psoftg1.readermanagement.api.ReaderViewAMQP;
-//import pt.psoft.g1.psoftg1.readermanagement.model.ReaderDetails;
-////import pt.psoft.g1.psoftg1.shared.model.Photo;
-////import pt.psoft.g1.psoftg1.usermanagement.model.Reader;
-////import pt.psoft.g1.psoftg1.usermanagement.services.UserService;
-//
-//import java.nio.file.Paths;
-//import java.util.List;
-//
-///**
-// * Brief guide:
-// * <a href="https://www.baeldung.com/mapstruct">https://www.baeldung.com/mapstruct</a>
-// * */
-//@Mapper(componentModel = "spring", uses = {ReaderService.class/*, UserService.class*/})
-//public abstract class ReaderMapper {
-////
-////    @Mapping(target = "username", source = "username")
-////    @Mapping(target = "password", source = "password")
-////    @Mapping(target = "name", source = "fullName")
-//
-//
-//    @Mapping(target = "photo", source = "photoURI")
-//    public abstract ReaderDetails createReaderDetails(int readerNumber, /*Reader reader,*/ CreateReaderRequest request, String photoURI/*, List<Genre> interestList*/);
-//
-//}
+package pt.psoft.g1.psoftg1.readermanagement.services;
+
+import org.mapstruct.Mapper;
+import org.mapstruct.Mapping;
+import org.mapstruct.MappingTarget;
+import pt.psoft.g1.psoftg1.readermanagement.api.ReaderView;
+import pt.psoft.g1.psoftg1.readermanagement.model.ReaderDetails;
+import pt.psoft.g1.psoftg1.shared.api.MapperInterface;
+
+@Mapper(componentModel = "spring")
+public abstract class ReaderMapper extends MapperInterface {
+
+    @Mapping(target = "readerNumber", expression = "java(readerDetails.getReaderNumber().toString())")
+    @Mapping(target = "birthDate", expression = "java(readerDetails.getBirthDate().toString())")
+    @Mapping(target = "phoneNumber", expression = "java(readerDetails.getPhoneNumber().toString())")
+    @Mapping(target = "fullName", source = "fullName")
+    @Mapping(target = "username", source = "username")
+    @Mapping(target = "photoUrl", ignore = true)
+    public abstract ReaderView toReaderView(ReaderDetails readerDetails);
+
+    @Mapping(target = "readerNumber", ignore = true)
+    @Mapping(target = "birthDate", ignore = true)
+    @Mapping(target = "photo", ignore = true)
+    // Removed 'pk' ignore as it caused unknown property error
+    @Mapping(target = "version", ignore = true)
+    public abstract void updateReader(UpdateReaderRequest request, @MappingTarget ReaderDetails readerDetails);
+}

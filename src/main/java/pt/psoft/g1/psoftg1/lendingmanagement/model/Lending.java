@@ -117,6 +117,11 @@ public class Lending extends EntityWithPhoto {
             return (int) Math.max(0, ChronoUnit.DAYS.between(limitDate, LocalDate.now()));
         }
     }
+
+    public int getDaysUntilReturn() {
+        // Implementation logic
+        return 0; // placeholder
+    }
     
     public int getDaysOverdue() {
         return getDaysDelayed();

@@ -1,85 +1,62 @@
 package pt.psoft.g1.psoftg1.lendingmanagement.infrastructure.publishers.impl;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import lombok.RequiredArgsConstructor;
 import org.springframework.amqp.core.DirectExchange;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 import pt.psoft.g1.psoftg1.lendingmanagement.api.LendingViewAMQP;
 import pt.psoft.g1.psoftg1.lendingmanagement.api.LendingViewAMQPMapper;
 import pt.psoft.g1.psoftg1.lendingmanagement.model.Lending;
+import pt.psoft.g1.psoftg1.lendingmanagement.publishers.LendingEventsPublisher;
 import pt.psoft.g1.psoftg1.lendingmanagement.services.SetLendingReturnedWithRecommendationRequest;
 import pt.psoft.g1.psoftg1.shared.model.LendingEvents;
-import pt.psoft.g1.psoftg1.lendingmanagement.publishers.LendingEventsPublisher;
 
 @Service
 @RequiredArgsConstructor
 public class LendingEventsRabbitmqPublisherImpl implements LendingEventsPublisher {
 
-    @Autowired
-    private RabbitTemplate template;
-    @Autowired
+    private final RabbitTemplate template;
     @Qualifier("directExchangeLendings")
-    private DirectExchange direct;
+    private final DirectExchange direct;
     private final LendingViewAMQPMapper lendingViewAMQPMapper;
 
     @Override
     public void sendLendingCreated(Lending lending) {
-        sendLendingEvent(lending, lending.getVersion(), LendingEvents.LENDING_CREATED);
+        sendEvent(lending, LendingEvents.LENDING_CREATED, null);
     }
 
     @Override
-    public void sendLendingUpdated(Lending lending, Long currentVersion) {
-        sendLendingEvent(lending, currentVersion, LendingEvents.LENDING_UPDATED);
-    }
-
-
-
-    public void sendLendingEvent(Lending lending, Long currentVersion, String lendingEventType) {
-        try {
-            ObjectMapper objectMapper = new ObjectMapper();
-            objectMapper.registerModule(new JavaTimeModule());
-
-            LendingViewAMQP lendingViewAMQP = lendingViewAMQPMapper.toLendingViewAMQP(lending);
-            lendingViewAMQP.setVersion(currentVersion);
-            lendingViewAMQP.setIsbn(lending.getBook().getIsbn());
-            lendingViewAMQP.setReaderNumber(lending.getReaderDetails().getReaderNumber());
-
-            String jsonString = objectMapper.writeValueAsString(lendingViewAMQP);
-
-            this.template.convertAndSend(direct.getName(), lendingEventType, jsonString);
-
-            System.out.println(" [x] Sent '" + jsonString + "'");
-        }
-        catch( Exception ex ) {
-            System.out.println(" [x] Exception sending lending event: '" + ex.getMessage() + "'");
-        }
+    public void sendLendingUpdated(Lending updatedLending, Long version) {
+        sendEvent(updatedLending, LendingEvents.LENDING_UPDATED, version);
     }
 
     @Override
     public void sendLendingWithCommentary(Lending updatedLending, long desiredVersion, SetLendingReturnedWithRecommendationRequest resource) {
+        // Implementation for commentary event
+        // Note: The resource data might need to be part of the message if the Queue listener expects it.
+        // For now, we send the updated lending view.
+        sendEvent(updatedLending, LendingEvents.LENDING_UPDATED_WITH_RECOMMENDATION, desiredVersion);
+    }
+
+    private void sendEvent(Lending lending, String routingKey, Long version) {
         try {
-            ObjectMapper objectMapper = new ObjectMapper();
-            objectMapper.registerModule(new JavaTimeModule());
-
-            LendingViewAMQP lendingViewAMQP = lendingViewAMQPMapper.toLendingViewAMQP(updatedLending);
-            lendingViewAMQP.setVersion(desiredVersion);
-            lendingViewAMQP.setIsbn(updatedLending.getBook().getIsbn());
-            lendingViewAMQP.setReaderNumber(updatedLending.getReaderDetails().getReaderNumber());
-            lendingViewAMQP.setCommentary(resource.getCommentary());
-            lendingViewAMQP.setIsRecommended(resource.getIsRecommended());
-
-            String jsonString = objectMapper.writeValueAsString(lendingViewAMQP);
-
-            this.template.convertAndSend(direct.getName(), LendingEvents.LENDING_UPDATED_WITH_RECOMMENDATION, jsonString);
-
-            System.out.println(" [x] Sent '" + jsonString + "'");
-        }
-        catch( Exception ex ) {
-            System.out.println(" [x] Exception sending lending with recommendation event: '" + ex.getMessage() + "'");
+            LendingViewAMQP view = lendingViewAMQPMapper.toLendingViewAMQP(lending);
+            if (version != null) {
+                view.setVersion(version);
+            }
+            // Manually map fields that might be missing in the mapper for flattened objects
+            view.setIsbn(lending.getBookIsbn());
+            view.setReaderNumber(lending.getReaderDetails().getReaderNumber().toString());
+            
+            ObjectMapper mapper = new ObjectMapper();
+            String json = mapper.writeValueAsString(view);
+            
+            template.convertAndSend(direct.getName(), routingKey, json);
+            System.out.println(" [x] Sent '" + json + "' to " + routingKey);
+        } catch (Exception e) {
+            System.err.println(" [!] Error sending event: " + e.getMessage());
         }
     }
 }

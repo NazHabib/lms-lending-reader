@@ -1,65 +1,28 @@
 package pt.psoft.g1.psoftg1.readermanagement.services;
 
-import jakarta.annotation.Nullable;
-import jakarta.validation.constraints.NotBlank;
-import lombok.*;
-import org.springframework.web.multipart.MultipartFile;
-//import pt.psoft.g1.psoftg1.genremanagement.model.Genre;
-
+import lombok.AllArgsConstructor;
+import lombok.Data;
+import lombok.NoArgsConstructor;
 import java.util.List;
 
-@Getter
-@Setter
 @Data
 @NoArgsConstructor
+@AllArgsConstructor
 public class UpdateReaderRequest {
-    @Setter
-    @Getter
-    private String number;
-
-    @Getter
-    @Setter
-    @Nullable
-    private String username;
-
-    @Getter
-    @Setter
-    @Nullable
-    private String password;
-
-    @Getter
-    @Nullable
     private String fullName;
-
-    @Getter
-    @Nullable
-    private String birthDate;
-
-    @Getter
-    @Nullable
+    private String username;
+    private String password;
     private String phoneNumber;
-
-    @Nullable
-    private boolean marketing;
-
-    @Nullable
-    private boolean thirdParty;
-
-    @Nullable
-    @Getter
-    @Setter
+    private String birthDate;
+    private Boolean gdprConsent;
+    private Boolean marketingConsent;
+    private Boolean thirdPartySharingConsent;
     private List<String> interestList;
 
-    @Nullable
-    @Getter
-    @Setter
-    private MultipartFile photo;
-
-    public boolean getThirdParty() {
-        return thirdParty;
-    }
-
-    public boolean getMarketing() {
-        return marketing;
-    }
+    // Helper methods to match Service calls
+    public Boolean getMarketing() { return marketingConsent; }
+    public Boolean getThirdParty() { return thirdPartySharingConsent; }
+    public Boolean isGdprConsent() { return gdprConsent; }
+    public Boolean isMarketingConsent() { return marketingConsent; }
+    public Boolean isThirdPartyConsent() { return thirdPartySharingConsent; }
 }

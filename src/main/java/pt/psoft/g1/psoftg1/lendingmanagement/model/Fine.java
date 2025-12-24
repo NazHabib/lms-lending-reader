@@ -1,49 +1,43 @@
 package pt.psoft.g1.psoftg1.lendingmanagement.model;
 
 import jakarta.persistence.*;
+import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.PositiveOrZero;
 import lombok.Getter;
-import lombok.Setter;
+import lombok.NoArgsConstructor;
 
-import java.util.Objects;
+import java.time.LocalDate;
 
-/**
- * The {@code Fine} class models a fine applied when a lending is past its due date.
- * <p>It stores its current value, and the associated {@code Lending}.
- * @author  rmfranca*/
-@Getter
 @Entity
+@Getter
+@NoArgsConstructor
 public class Fine {
+
     @Id
     @GeneratedValue(strategy = GenerationType.AUTO)
     private Long pk;
 
-    @PositiveOrZero
-    @Column(updatable = false)
-    private int fineValuePerDayInCents;
+    @Version
+    private Long version;
 
-    /**Fine value in Euro cents*/
+    @NotNull
     @PositiveOrZero
-    int centsValue;
+    private int cents;
 
-    @Setter
-    @OneToOne(optional = false, orphanRemoval = true)
-    @JoinColumn(name = "lending_pk", nullable = false, unique = true)
+    @OneToOne
+    @NotNull
     private Lending lending;
 
-    /**
-     * Constructs a new {@code Fine} object. Sets the current value of the fine,
-     * as well as the fine value per day at the time of creation.
-     * @param   lending transaction which generates this fine.
-     * */
     public Fine(Lending lending) {
-        if(lending.getDaysDelayed() <= 0)
-            throw new IllegalArgumentException("Lending is not overdue");
-        fineValuePerDayInCents = lending.getFineValuePerDayInCents();
-        centsValue = fineValuePerDayInCents * lending.getDaysDelayed();
-        this.lending = Objects.requireNonNull(lending);
+        this.lending = lending;
+        // Logic to calculate cents based on delay
+        int daysDelayed = lending.getDaysDelayed();
+        int finePerDay = lending.getFineValuePerDayInCents();
+        this.cents = Math.max(0, daysDelayed * finePerDay);
     }
-
-    /**Protected empty constructor for ORM only.*/
-    protected Fine() {}
+    
+    // Explicit getter just in case Lombok @Getter didn't cover it properly for the mapper
+    public int getCents() {
+        return cents;
+    }
 }

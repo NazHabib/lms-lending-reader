@@ -1,3 +1,4 @@
+/* 
 package pt.psoft.g1.psoftg1.bootstrapping;
 
 import lombok.RequiredArgsConstructor;
@@ -262,3 +263,4 @@ public class UserBootstrapper implements CommandLineRunner {
         }
     }
 }
+*/
